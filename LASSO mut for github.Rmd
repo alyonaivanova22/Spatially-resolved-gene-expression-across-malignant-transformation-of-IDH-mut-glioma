@@ -1,0 +1,563 @@
+---
+title: "lasso"
+author: "Alyona"
+date: "2025-04-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE}
+# Load libraries
+library(glmnet)
+library(survival)
+library(survminer)
+library(tidyverse)
+library(readxl)
+```
+
+
+
+```{r, echo=FALSE}
+# Load clinical data
+clinical <- read_excel(".../TCGAdata/TCGA-CDR-SupplementalTableS1.xlsx", sheet = 1)
+```
+
+```{r, echo=FALSE}
+# Load RNA-seq data
+expr_raw <- read.delim("/.../TCGAdata/EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv", stringsAsFactors = FALSE)
+```
+
+```{r}
+#load idh status data
+idh_data <- read_excel("/.../TCGAdata/ijms-2057006_TableS2.xlsx", sheet = 1)
+```
+
+```{r}
+# Rename Case_ID to match clinical dataset
+colnames(idh_data)[colnames(idh_data) == "Case_ID"] <- "bcr_patient_barcode"
+```
+
+```{r}
+idh_data$bcr_patient_barcode <- toupper(trimws(idh_data$bcr_patient_barcode))
+clinical$bcr_patient_barcode <- toupper(trimws(clinical$bcr_patient_barcode))
+
+```
+
+```{r}
+merged_data <- merge(idh_data, clinical, by = "bcr_patient_barcode", all.x = TRUE)
+```
+
+```{r}
+head(merged_data)
+```
+
+
+```{r}
+# Clean gene symbols (remove version suffix if present)
+expr_data <- expr_raw
+expr_data$gene_id <- gsub("\\|.*", "", expr_data$gene_id)
+expr_data_clean <- expr_raw %>%
+  separate(gene_id, into = c("gene_symbol", "entrez_id"), sep = "\\|")
+```
+
+```{r}
+# If expr_raw is a SummarizedExperiment or similar, convert first
+expr_data <- as.data.frame(expr_raw)
+
+# Separate gene ID column into gene symbol and entrez_id
+expr_data_clean <- expr_data %>%
+  tidyr::separate(gene_id, into = c("gene_symbol", "entrez_id"), sep = "\\|")
+
+# Remove duplicate gene symbols by keeping the first occurrence
+expr_data_nodup <- expr_data_clean %>%
+  dplyr::group_by(gene_symbol) %>%
+  dplyr::slice(1) %>%
+  dplyr::ungroup()
+```
+
+```{r}
+expr_tidy <- expr_data_nodup %>%
+  column_to_rownames("gene_symbol") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("barcode")
+```
+
+```{r}
+# Clean up barcodes (skip first row which is header info)
+clean_barcodes <- gsub("\\.", "-", expr_tidy[-1, 1])  # Replace "." with "-"
+clean_barcodes <- sapply(strsplit(clean_barcodes, "-"), function(x) paste(x[1:3], collapse = "-"))
+
+# Apply cleaned barcodes
+expr_tidy[-1, 1] <- clean_barcodes  # Replace original barcodes in column 1 (assuming it's named 'barcode')
+
+# Optional: Rename the first column to make it clearer
+colnames(expr_tidy)[1] <- "barcode"
+
+# Check the result
+head(expr_tidy[, 1:5])
+```
+
+```{r}
+merged <- inner_join(merged_data, expr_tidy, by = c("bcr_patient_barcode" = "barcode"))
+```
+
+```{r}
+# Keep only IDH-mutant cases
+merged_filtered <- merged %>%
+  filter(`IDH status` == "Mutant")
+head(merged_filtered)
+```
+
+
+```{r}
+nrow(merged_filtered)
+```
+
+```{r}
+expr_genes <- colnames(expr_tidy)[-1]
+```
+
+```{r}
+merged_g2_g3 <- merged %>%
+  filter(`IDH status` == "Mutant", `TCGA Grade` %in% c("G2", "G3"))
+head(merged_g2_g3)
+```
+
+```{r}
+merged_g3_g4 <- merged %>%
+  filter(`IDH status` == "Mutant", `TCGA Grade` %in% c("G3", "G4"))
+head(merged_g3_g4)
+```
+
+```{r}
+merged_g4 <- merged %>%
+  filter(`IDH status` == "Mutant", `TCGA Grade` %in% c("G4"))
+head(merged_g4)
+```
+
+```{r}
+#define genes of interest
+genes_of_interest <- c("TTYH2", "DNAJB2", "MYH2", "CNP", "CNTN2", "DAAM2", "PLEKHG3", "CLDND1", "EDIL3", "SRCIN1", "CRYAB", "CD44", "SEMA4D", "THY1", "CDH9", "CDH12", "NCAM2", "EPHA7", "EPHA10","CORO6", "RASAL1", "CELF4")
+#genes from Deseq2
+#genes_of_interest <- c("SRCIN1", "CNTN2", "KLK6", "VIM", "SEMA4D", "APOE", "COBL", 
+ #          "DPYSL3", "NTN1", "PRRX1", "FLNA", "RGMA", "ACAP3", "PTPRD", "LPAR1", 
+  #         "DDR2", "GFAP", "LRRC7", "FN1", "DPYSL5", "B2M", "RND2", "TUBB2B", 
+   #        "METRN", "PACSIN1")
+```
+
+```{r}
+missing_genes <- setdiff(genes_of_interest, colnames(merged_filtered_clean))
+print(missing_genes)
+```
+
+
+```{r}
+# Clean merged_filtered for survival modeling
+merged_filtered_clean <- merged_filtered %>%
+  filter(!is.na(OS.time), !is.na(OS), OS.time > 0)
+
+merged_filtered_pfi_clean <- merged_filtered %>%
+  filter(!is.na(PFI.time), !is.na(PFI), PFI.time > 0)
+
+# Check result
+nrow(merged_filtered)
+summary(merged_filtered_clean$OS.time)
+```
+
+
+```{r}
+# Subset and clean expression matrix
+x <- as.matrix(merged_filtered_clean[, genes_of_interest])
+x <- apply(x, 2, as.numeric)
+x <- log2(x + 1)
+
+# Create survival object
+y_os <- Surv(merged_filtered_clean$OS.time, merged_filtered_clean$OS)
+```
+
+```{r}
+# Subset and convert expression matrix to numeric and log-transform
+x_pfi <- as.matrix(merged_filtered_pfi_clean[, genes_of_interest])
+x_pfi <- apply(x_pfi, 2, as.numeric)
+x_pfi <- log2(x_pfi + 1)
+
+# Create PFI survival object
+y_pfs <- Surv(merged_filtered_pfi_clean$PFI.time, merged_filtered_pfi_clean$PFI)
+```
+
+```{r}
+set.seed(123)
+train_idx <- sample(seq_len(nrow(x)), size = 0.75 * nrow(x))
+x_train <- x[train_idx, ]
+x_test  <- x[-train_idx, ]
+y_train_os <- y_os[train_idx]
+y_test_os  <- y_os[-train_idx]
+```
+
+```{r}
+set.seed(123)
+train_idx_pfi <- sample(seq_len(nrow(x_pfi)), size = 0.75 * nrow(x_pfi))
+x_train_pfi <- x_pfi[train_idx_pfi, ]
+x_test_pfi  <- x_pfi[-train_idx_pfi, ]
+y_train_pfs <- y_pfs[train_idx_pfi]
+y_test_pfs  <- y_pfs[-train_idx_pfi]
+
+```
+
+```{r}
+lasso_os <- cv.glmnet(x_train, y_train_os, family = "cox", alpha = 1, nfolds = 10)
+```
+
+```{r}
+lasso_pfs <- cv.glmnet(x_train_pfi, y_train_pfs, family = "cox", alpha = 1, nfolds = 10)
+```
+
+```{r, echo=FALSE}
+# Fit Elastic Net models (alpha optimized from 0.05 to 0.95)
+alphas <- seq(0.05, 0.95, by = 0.05)
+find_best_model <- function(x_train, y) {
+  best_model <- NULL
+  best_cvm <- Inf
+  for (a in alphas) {
+    cv_fit <- cv.glmnet(x_train, y, family = "cox", alpha = a, nfolds = 10)
+    if (min(cv_fit$cvm) < best_cvm) {
+      best_model <- cv_fit
+      best_cvm <- min(cv_fit$cvm)
+    }
+  }
+  return(best_model)
+}
+
+enet_os  <- find_best_model(x_train, y_train_os)
+enet_pfs <- find_best_model(x_train_pfi, y_train_pfs)
+```
+
+
+```{r, echo=FALSE}
+# Extract non-zero coefficients
+get_nonzero_coefs <- function(model, gene_names) {
+  coefs <- coef(model, s = "lambda.min")
+  coefs_df <- data.frame(
+    Gene = gene_names[coefs@i + 1],
+    Coefficient = coefs@x
+  )
+  coefs_df
+}
+```
+
+
+```{r, echo=FALSE}
+lasso_os_coefs   <- get_nonzero_coefs(lasso_os, colnames(x))
+lasso_pfs_coefs  <- get_nonzero_coefs(lasso_pfs, colnames(x))
+enet_os_coefs    <- get_nonzero_coefs(enet_os, colnames(x))
+enet_pfs_coefs   <- get_nonzero_coefs(enet_pfs, colnames(x))
+```
+
+
+```{r, echo=FALSE}
+# Plotting function
+plot_coefs <- function(df, title) {
+  ggplot(df, aes(x = Coefficient, y = reorder(Gene, Coefficient))) +
+    geom_point() +
+    geom_segment(aes(x = 0, xend = Coefficient, yend = Gene), color = "gray") +
+    labs(title = title, y = "Gene", x = "Coefficient") +
+    theme_minimal()
+}
+```
+
+
+```{r, echo=FALSE}
+# Combine plots
+library(gridExtra)
+grid.arrange(
+  plot_coefs(lasso_pfs_coefs, "LASSO Cox regression coefficients for PFS"),
+  plot_coefs(lasso_os_coefs, "LASSO Cox regression coefficients for OS"),
+  plot_coefs(enet_pfs_coefs, "Elastic Net Cox regression coefficients for PFS"),
+  plot_coefs(enet_os_coefs, "Elastic Net Cox regression coefficients for OS"),
+  ncol = 2 #PFS left column, OS right column 
+)
+```
+
+#Predict & rescale risk scores for each model
+```{r, echo=FALSE}
+# Predict risk scores
+predict_rescale <- function(model, x_test) {
+  raw_scores <- predict(model, newx = x_test, s = "lambda.min", type = "link")
+  rescaled <- (raw_scores - min(raw_scores)) / (max(raw_scores) - min(raw_scores))
+  return(as.vector(rescaled))
+}
+```
+
+
+```{r, echo=FALSE}
+test_data_os <- data.frame(
+  OS_time = merged_filtered_clean$OS.time[-train_idx],
+  OS_event = merged_filtered_clean$OS[-train_idx],
+  lasso_os_score = predict_rescale(lasso_os, x_test),
+  enet_os_score = predict_rescale(enet_os, x_test)
+)
+```
+
+
+```{r, echo=FALSE}
+test_data_pfi <- data.frame(
+  PFS_time = merged_filtered_pfi_clean$PFI.time[-train_idx_pfi],
+  PFS_event = merged_filtered_pfi_clean$PFI[-train_idx_pfi],
+  lasso_pfs_score = predict_rescale(lasso_pfs, x_test_pfi),
+  enet_pfs_score = predict_rescale(enet_pfs, x_test_pfi)
+)
+
+```
+
+#Evaluate c-index using Cox models
+```{r}
+cox_lasso_os  <- coxph(Surv(OS_time, OS_event) ~ lasso_os_score, data = test_data_os)
+cox_lasso_pfs <- coxph(Surv(PFS_time, PFS_event) ~ lasso_pfs_score, data = test_data_pfi)
+cox_enet_os   <- coxph(Surv(OS_time, OS_event) ~ enet_os_score, data = test_data_os)
+cox_enet_pfs  <- coxph(Surv(PFS_time, PFS_event) ~ enet_pfs_score, data = test_data_pfi)
+
+summary(cox_lasso_os)$concordance
+summary(cox_lasso_pfs)$concordance
+summary(cox_enet_os)$concordance
+summary(cox_enet_pfs)$concordance
+```
+```{r}
+# Stratify using surv_cutpoint & plot KM curves
+make_km_plot <- function(data, time, event, score, label) {
+  df <- data[, c(time, event, score)]
+  colnames(df) <- c("time", "event", "score")
+
+  cut <- surv_cutpoint(df, time = "time", event = "event", variables = "score")
+  df$risk_group <- surv_categorize(cut)$score
+
+  surv_fit <- survfit(Surv(time, event) ~ risk_group, data = df)
+
+  ggsurvplot(surv_fit,
+             data = df,
+             pval = TRUE,
+             risk.table = TRUE,
+             palette = c("#1f78b4", "#e31a1c"),
+             legend.labs = c("Low", "High"),
+             title = paste("KM Curve:", label))
+}
+
+```
+
+#Generate KM plots for all models
+```{r}
+p1 <- make_km_plot(test_data_pfi, "PFS_time", "PFS_event", "lasso_pfs_score", "LASSO - PFS")
+p2 <- make_km_plot(test_data_os, "OS_time",  "OS_event",  "lasso_os_score",  "LASSO - OS")
+p3 <- make_km_plot(test_data_pfi, "PFS_time", "PFS_event", "enet_pfs_score",  "Elastic Net - PFS")
+p4 <- make_km_plot(test_data_os, "OS_time",  "OS_event",  "enet_os_score",   "Elastic Net - OS")
+
+grid.arrange(p1$plot, p2$plot, p3$plot, p4$plot, ncol = 2)
+
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(broom)
+```
+
+
+```{r}
+extract_cox_stats <- function(cox_model, score_name, n) {
+  tidy_cox <- broom::tidy(cox_model)
+  row <- tidy_cox %>% filter(term == score_name)
+  
+  beta <- row$estimate
+  se <- row$std.error
+  pval <- row$p.value
+  
+  hr <- exp(beta * 0.1)
+  lower <- exp((beta - 1.96 * se) * 0.1)
+  upper <- exp((beta + 1.96 * se) * 0.1)
+  
+  data.frame(
+    Model = score_name,
+    HR = hr,
+    Lower_CI = lower,
+    Upper_CI = upper,
+    p_value = pval,
+    n = n
+  )
+}
+
+# Example: get sample sizes from your test_data_os and test_data_pfs (or however named)
+n_os <- nrow(test_data_os)   # samples for OS models
+n_pfs <- nrow(test_data_pfi) # samples for PFS models
+
+# Extract stats for each model
+hr_lasso_os  <- extract_cox_stats(cox_lasso_os, "lasso_os_score", n_os)
+hr_lasso_pfs <- extract_cox_stats(cox_lasso_pfs, "lasso_pfs_score", n_pfs)
+hr_enet_os   <- extract_cox_stats(cox_enet_os, "enet_os_score", n_os)
+hr_enet_pfs  <- extract_cox_stats(cox_enet_pfs, "enet_pfs_score", n_pfs)
+
+# Combine all
+hr_df <- bind_rows(hr_lasso_os, hr_lasso_pfs, hr_enet_os, hr_enet_pfs)
+
+# Clean Model names
+hr_df$Model <- recode(hr_df$Model,
+                      lasso_os_score = "LASSO OS",
+                      lasso_pfs_score = "LASSO PFS",
+                      enet_os_score = "Elastic Net OS",
+                      enet_pfs_score = "Elastic Net PFS")
+
+# Format p-values for display
+hr_df <- hr_df %>%
+  mutate(p_label = ifelse(p_value < 0.001, "< 0.001", sprintf("= %.3f", p_value)),
+         n_label = paste0("n = ", n),
+         label = paste0("HR = ", round(HR, 2), "\n", 
+                        "95% CI: [", round(Lower_CI, 2), "-", round(Upper_CI, 2), "]\n",
+                        "p ", p_label, "\n", n_label))
+
+```
+
+```{r}
+ggplot(hr_df, aes(x = Model, y = HR)) +
+  geom_point(size = 4, color = "darkblue") +
+  geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "darkblue") +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+  geom_text(aes(label = label), hjust = -0.1, size = 3) +
+  coord_flip() +
+  ylim(min(hr_df$Lower_CI)*0.8, max(hr_df$Upper_CI)*1.2) +
+  labs(
+    title = "Hazard Ratios per 0.1 Increase in Spatial Connectivity Score",
+    subtitle = "With 95% Confidence Intervals, p-values and Sample Sizes",
+    x = NULL,
+    y = "Hazard Ratio (HR)"
+  ) +
+  theme_minimal(base_size = 14)
+```
+
+```{r}
+str(test_data_os)
+
+```
+
+```{r}
+#repeat analysis but add grade as a factor
+merged_filtered_clean$`TCGA Grade` <- factor(merged_filtered_clean$`TCGA Grade`, levels = c("G2", "G3", "G4"))
+```
+
+```{r}
+# Ensure grade is a properly ordered factor
+merged_filtered_clean$`TCGA Grade` <- factor(
+  merged_filtered_clean$`TCGA Grade`,
+  levels = c("G2", "G3", "G4")
+)
+
+# Check levels
+table(merged_filtered_clean$`TCGA Grade`)
+```
+
+
+```{r}
+# Overall Survival model
+cox_os <- coxph(Surv(OS.time, OS) ~ `TCGA Grade`, data = merged_filtered_clean)
+summary(cox_os)
+
+# Progression-Free Survival model
+cox_pfs <- coxph(Surv(PFI.time, PFI) ~ `TCGA Grade`, data = merged_filtered_clean)
+summary(cox_pfs)
+```
+```{r}
+test_data_os$`TCGA Grade` <- merged_filtered_clean$`TCGA Grade`[-train_idx]
+```
+```{r}
+cox_os_adj <- coxph(Surv(OS_time, OS_event) ~ lasso_os_score + `TCGA Grade`, data = test_data_os)
+summary(cox_os_adj)
+```
+```{r}
+test_data_pfi$`TCGA Grade` <- merged_filtered_pfi_clean$`TCGA Grade`[-train_idx_pfi]
+
+cox_pfs_adj <- coxph(Surv(PFS_time, PFS_event) ~ lasso_pfs_score + `TCGA Grade`, data = test_data_pfi)
+summary(cox_pfs_adj)
+```
+```{r}
+#Convert TCGA Grade to factor in your datasets
+merged_filtered_clean$`TCGA Grade` <- factor(merged_filtered_clean$`TCGA Grade`)
+merged_filtered_pfi_clean$`TCGA Grade` <- factor(merged_filtered_pfi_clean$`TCGA Grade`)
+```
+
+```{r}
+#When splitting data, subset the grade variable alongside expression and survival
+set.seed(123)
+train_idx <- sample(seq_len(nrow(x)), size = 0.75 * nrow(x))
+x_train <- x[train_idx, ]
+x_test  <- x[-train_idx, ]
+y_train_os <- y_os[train_idx]
+y_test_os  <- y_os[-train_idx]
+
+grade_train <- merged_filtered_clean$`TCGA Grade`[train_idx]
+grade_test  <- merged_filtered_clean$`TCGA Grade`[-train_idx]
+
+```
+```{r}
+set.seed(123)
+train_idx_pfi <- sample(seq_len(nrow(x_pfi)), size = 0.75 * nrow(x_pfi))
+x_train_pfi <- x_pfi[train_idx_pfi, ]
+x_test_pfi  <- x_pfi[-train_idx_pfi, ]
+y_train_pfs <- y_pfs[train_idx_pfi]
+y_test_pfs  <- y_pfs[-train_idx_pfi]
+
+grade_train_pfi <- merged_filtered_pfi_clean$`TCGA Grade`[train_idx_pfi]
+grade_test_pfi  <- merged_filtered_pfi_clean$`TCGA Grade`[-train_idx_pfi]
+
+```
+
+```{r}
+#combine gene expression risk scores with grade (factor) in Cox models
+# Example: OS in test data with gene score + TCGA Grade (factor)
+test_data_os <- data.frame(
+  lasso_os_score = predict(lasso_os, newx = x_test, s = "lambda.min", type = "link"),
+  `TCGA Grade` = grade_test,
+  OS_time = merged_filtered_clean$OS.time[-train_idx],
+  OS_event = merged_filtered_clean$OS[-train_idx]
+)
+```
+
+
+```{r}
+# Fit Cox model including factor grade and gene score
+# Predict risk score (linear predictor) on test data
+lasso_os_score <- predict(lasso_os, newx = x_test, s = "lambda.min", type = "link")
+
+# It's a matrix with 1 column and nrow(x_test) rows, convert to vector
+lasso_os_score <- as.vector(lasso_os_score)
+
+# Create test data frame including the predicted score and the grade factor
+test_data_os <- data.frame(
+  lasso_os_score = lasso_os_score,
+  `TCGA Grade` = grade_test,
+  OS_time = merged_filtered_clean$OS.time[-train_idx],
+  OS_event = merged_filtered_clean$OS[-train_idx]
+)
+
+# Fit Cox model
+cox_os_adj <- coxph(Surv(OS_time, OS_event) ~ lasso_os_score + `TCGA.Grade`, data = test_data_os)
+summary(cox_os_adj)
+```
+```{r}
+# Predict risk score (linear predictor) on test data
+lasso_pfs_score <- predict(lasso_pfs, newx = x_test, s = "lambda.min", type = "link")
+
+# It's a matrix with 1 column and nrow(x_test) rows, convert to vector
+lasso_pfs_score <- as.vector(lasso_pfs_score)
+
+test_data_pfi <- data.frame(
+  lasso_pfs_score = predict(lasso_pfs, newx = x_test_pfi, s = "lambda.min", type = "link"),
+  `TCGA Grade` = grade_test_pfi,
+  PFS_time = merged_filtered_pfi_clean$PFI.time[-train_idx_pfi],
+  PFS_event = merged_filtered_pfi_clean$PFI[-train_idx_pfi]
+)
+
+cox_pfi_adj <- coxph(Surv(PFS_time, PFS_event) ~ lasso_pfs_score + `TCGA.Grade`, data = test_data_pfi)
+summary(cox_pfi_adj)
+
+```

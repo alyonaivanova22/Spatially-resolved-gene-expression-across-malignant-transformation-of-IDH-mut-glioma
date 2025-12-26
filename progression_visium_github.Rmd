@@ -1,0 +1,498 @@
+---
+title: "progression_visium_github"
+author: "Alyona"
+date: "2025-09-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#load libraries
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+
+```
+
+
+```{r}
+data_dir <- '/.../Das_Alyona__BT2015050_2015_A1/outs'
+seurat_object_sp_stage2 <- Load10X_Spatial(
+  data_dir, #directory containing the H5 file specified by filename and the image data in a subdirectory called spatial
+  filename = "filtered_feature_bc_matrix.h5", #name of H5 file containing the feature barcode matrix
+  assay = "Spatial", #name of the initial assay
+  slice = "Stage 2", #name for the stored image of the tissue slice
+  filter.matrix = TRUE, #only keep spots that have been determined to be over tissue
+  to.upper = FALSE,
+  image = NULL, #name of image to pull the coordinates from
+)
+if (FALSE) {
+  data_dir <- 'path/to/data/directory'
+  list.files(data_dir) # Should show filtered_feature_bc_matrix.h5
+  Load10X_Spatial(data.dir = data_dir)
+}
+```
+
+```{r}
+
+data_dir <- '/.../Das_Alyona__BT2015050_2017_1_D1/outs'
+seurat_object_sp_stage3 <- Load10X_Spatial(
+  data_dir, #directory containing the H5 file specified by filename and the image data in a subdirectory called spatial
+  filename = "filtered_feature_bc_matrix.h5", #name of H5 file containing the feature barcode matrix
+  assay = "Spatial", #name of the initial assay
+  slice = "Stage 2", #name for the stored image of the tissue slice
+  filter.matrix = TRUE, #only keep spots that have been determined to be over tissue
+  to.upper = FALSE,
+  image = NULL, #name of image to pull the coordinates from
+)
+if (FALSE) {
+  data_dir <- 'path/to/data/directory'
+  list.files(data_dir) # Should show filtered_feature_bc_matrix.h5
+  Load10X_Spatial(data.dir = data_dir)
+}
+```
+
+```{r}
+data_dir <- '/.../Das_Alyona__BT2015050_2019_D1/outs'
+seurat_object_sp_stage4 <- Load10X_Spatial(
+  data_dir, #directory containing the H5 file specified by filename and the image data in a subdirectory called spatial
+  filename = "filtered_feature_bc_matrix.h5", #name of H5 file containing the feature barcode matrix
+  assay = "Spatial", #name of the initial assay
+  slice = "Stage 2", #name for the stored image of the tissue slice
+  filter.matrix = TRUE, #only keep spots that have been determined to be over tissue
+  to.upper = FALSE,
+  image = NULL, #name of image to pull the coordinates from
+)
+if (FALSE) {
+  data_dir <- 'path/to/data/directory'
+  list.files(data_dir) # Should show filtered_feature_bc_matrix.h5
+  Load10X_Spatial(data.dir = data_dir)
+}
+```
+
+```{r}
+#data pre-processing
+seurat_object_sp_stage2[["percent.mt"]] <- PercentageFeatureSet(seurat_object_sp_stage2, pattern = "^MT-") #mit genes
+seurat_object_sp_stage2[["percent.ribo"]] <- PercentageFeatureSet(seurat_object_sp_stage2, pattern = "^RPS|^RPL") #ribo genes
+seurat_object_sp_stage2[["percent.hb"]] <- PercentageFeatureSet(seurat_object_sp_stage2, pattern = "^HB[^(P)]") #hb genes
+seurat_object_sp_stage2[["percent.mbp"]] <- PercentageFeatureSet(seurat_object_sp_stage2, pattern = "^MBP")
+plot1 <- VlnPlot(seurat_object_sp_stage2, features = "nCount_Spatial", pt.size = 0.1) + NoLegend()
+plot2 <- VlnPlot(seurat_object_sp_stage2, features = "percent.mt", pt.size = 0.1) + NoLegend()
+plot3 <-VlnPlot(seurat_object_sp_stage2, features = "percent.ribo", pt.size = 0.1) + NoLegend()
+plot4 <- VlnPlot(seurat_object_sp_stage2, features = "percent.hb", pt.size = 0.1) + NoLegend()
+plot5 <- VlnPlot(seurat_object_sp_stage2, features = "percent.mbp", pt.size = 0.1) + NoLegend()
+plot6 <- SpatialFeaturePlot(seurat_object_sp_stage2, features = "nCount_Spatial") + theme(legend.position = "right")
+wrap_plots(plot1, plot2, plot3, plot4, plot5, plot6)
+```
+
+```{r}
+#data pre-processing
+seurat_object_sp_stage3[["percent.mt"]] <- PercentageFeatureSet(seurat_object_sp_stage3, pattern = "^MT-") #mit genes
+seurat_object_sp_stage3[["percent.ribo"]] <- PercentageFeatureSet(seurat_object_sp_stage3, pattern = "^RPS|^RPL") #ribo genes
+seurat_object_sp_stage3[["percent.hb"]] <- PercentageFeatureSet(seurat_object_sp_stage3, pattern = "^HB[^(P)]") #hb genes
+seurat_object_sp_stage3[["percent.mbp"]] <- PercentageFeatureSet(seurat_object_sp_stage3, pattern = "^MBP")
+plot1 <- VlnPlot(seurat_object_sp_stage3, features = "nCount_Spatial", pt.size = 0.1) + NoLegend()
+plot2 <- VlnPlot(seurat_object_sp_stage3, features = "percent.mt", pt.size = 0.1) + NoLegend()
+plot3 <-VlnPlot(seurat_object_sp_stage3, features = "percent.ribo", pt.size = 0.1) + NoLegend()
+plot4 <- VlnPlot(seurat_object_sp_stage3, features = "percent.hb", pt.size = 0.1) + NoLegend()
+plot5 <- VlnPlot(seurat_object_sp_stage3, features = "percent.mbp", pt.size = 0.1) + NoLegend()
+plot6 <- SpatialFeaturePlot(seurat_object_sp_stage3, features = "nCount_Spatial") + theme(legend.position = "right")
+wrap_plots(plot1, plot2, plot3, plot4, plot5, plot6)
+```
+
+```{r}
+#data pre-processing
+seurat_object_sp_stage4[["percent.mt"]] <- PercentageFeatureSet(seurat_object_sp_stage4, pattern = "^MT-") #mit genes
+seurat_object_sp_stage4[["percent.ribo"]] <- PercentageFeatureSet(seurat_object_sp_stage4, pattern = "^RPS|^RPL") #ribo genes
+seurat_object_sp_stage4[["percent.hb"]] <- PercentageFeatureSet(seurat_object_sp_stage4, pattern = "^HB[^(P)]") #hb genes
+seurat_object_sp_stage4[["percent.mbp"]] <- PercentageFeatureSet(seurat_object_sp_stage4, pattern = "^MBP")
+plot1 <- VlnPlot(seurat_object_sp_stage4, features = "nCount_Spatial", pt.size = 0.1) + NoLegend()
+plot2 <- VlnPlot(seurat_object_sp_stage4, features = "percent.mt", pt.size = 0.1) + NoLegend()
+plot3 <-VlnPlot(seurat_object_sp_stage4, features = "percent.ribo", pt.size = 0.1) + NoLegend()
+plot4 <- VlnPlot(seurat_object_sp_stage4, features = "percent.hb", pt.size = 0.1) + NoLegend()
+plot5 <- VlnPlot(seurat_object_sp_stage4, features = "percent.mbp", pt.size = 0.1) + NoLegend()
+plot6 <- SpatialFeaturePlot(seurat_object_sp_stage4, features = "nCount_Spatial") + theme(legend.position = "right")
+wrap_plots(plot1, plot2, plot3, plot4, plot5, plot6)
+```
+
+```{r}
+#subset out low quality cells
+seurat_object_sp_stage2 <- subset(seurat_object_sp_stage2, subset = percent.mt < 3 & percent.hb < 1)
+seurat_object_sp_stage3 <- subset(seurat_object_sp_stage2, subset = percent.mt < 3 & percent.hb < 1)
+seurat_object_sp_stage4 <- subset(seurat_object_sp_stage2, subset = percent.mt < 3 & percent.hb < 1)
+```
+
+```{r}
+#PERFORM z-normalization
+```
+
+```{r}
+seurat_object_sp_stage2 <- NormalizeData(seurat_object_sp_stage2)
+#seurat_object_sp_stage2 <- FindVariableFeatures(seurat_object_sp_stage2)
+seurat_object_sp_stage2 <- ScaleData(seurat_object_sp_stage2)
+```
+```{r}
+seurat_object_sp_stage3 <- NormalizeData(seurat_object_sp_stage3)
+#seurat_object_sp_stage2 <- FindVariableFeatures(seurat_object_sp_stage2)
+seurat_object_sp_stage3 <- ScaleData(seurat_object_sp_stage3)
+```
+
+```{r}
+seurat_object_sp_stage4 <- NormalizeData(seurat_object_sp_stage4)
+seurat_object_sp_stage4 <- ScaleData(seurat_object_sp_stage4)
+```
+
+```{r}
+#MERGE
+seurat_object_sp_stage2$orig.ident <- "Grade 2"
+seurat_object_sp_stage3$orig.ident <- "Grade 3"
+seurat_object_sp_stage4$orig.ident <- "Grade 4"
+patient.merge <- merge(
+  seurat_object_sp_stage2,
+  y = c(seurat_object_sp_stage3, seurat_object_sp_stage4),
+  merge.data = TRUE,
+  add.cell.ids = c("Grade2", "Grade3", "Grade4")
+)
+```
+
+
+```{r}
+table(patient.merge$orig.ident)
+```
+
+```{r}
+#Z-normalization happens during ScaleData(), which creates @scale.data. This is not merged
+#needs to be re-calculated after merging
+```
+
+```{r}
+#patient.merge <- NormalizeData(patient.merge)
+patient.merge <- FindVariableFeatures(patient.merge)
+#patient.merge <- ScaleData(patient.merge)
+```
+
+
+```{r}
+#join layers before running clustering
+patient.merge <- JoinLayers(patient.merge)
+```
+
+
+```{r}
+#Dimensionality reduction, clustering and visualization
+patient.merge <- RunPCA(patient.merge, assay = "Spatial", verbose = FALSE)
+patient.merge <- FindNeighbors(patient.merge, reduction = "pca", dims = 1:30)
+patient.merge <- FindClusters(patient.merge, resolution = 0.4, verbose = FALSE)
+patient.merge <- RunUMAP(patient.merge, reduction = "pca", dims = 1:30)
+```
+
+```{r}
+#visualize
+p1 <- DimPlot(patient.merge, reduction = "umap", label = TRUE)
+p2 <- SpatialDimPlot(patient.merge, label.size = 9, pt.size = 1, group.by = 'seurat_clusters')
+p3 <- DimPlot(patient.merge, label.size = 9, pt.size = 1, group.by = 'orig.ident')
+p1
+p2
+p3
+```
+
+```{r}
+#use log-normalized data for DE
+markers <- FindAllMarkers(patient.merge, group.by = 'orig.ident')
+```
+
+
+```{r}
+markers <- markers[order(markers$avg_log2FC, decreasing =TRUE), ]
+top_markers <- head(markers, n = 10)
+```
+
+```{r}
+top_markers
+```
+
+
+```{r}
+res_df_filtered <- markers %>%
+  filter(cluster == "Grade 4") %>%
+  arrange(desc(avg_log2FC))
+```
+
+```{r}
+res_df_filtered
+#this does not seem to be helpful rn
+```
+
+
+```{r}
+#set identities to Grade instead of clusters
+Idents(patient.merge) <- "orig.ident"
+levels(Idents(patient.merge))
+```
+
+```{r}
+# Run DE for one group vs all others
+stage4_markers <- FindMarkers(patient.merge, ident.1 = "Grade 4")
+```
+
+
+```{r}
+stage4_markers <- stage4_markers[order(stage4_markers$avg_log2FC, decreasing =TRUE), ]
+top_stage4_markers <- head(stage4_markers, n = 50)
+top_stage4_markers
+```
+
+```{r}
+write.csv(stage4_markers, "/.../stage4_markers.csv", row.names = TRUE)
+```
+
+```{r}
+p1 <- DimPlot(patient.merge, reduction = "umap", group.by = c("ident"), label = TRUE)
+p2 <- DimPlot(patient.merge, reduction = "umap", group.by = c("orig.ident"), label = TRUE)
+```
+
+```{r}
+p1
+p2
+```
+
+```{r}
+#Are the markers from GeoMx spatially variable?
+
+patient.list <- SplitObject(patient.merge, split.by = "orig.ident")
+
+# Run per sample
+patient.list <- lapply(patient.list, function(x) {
+  FindSpatiallyVariableFeatures(
+    x, 
+    assay = "Spatial",
+    selection.method = "moransi",
+    nfeatures = 2000
+  )
+})
+```
+
+```{r}
+lapply(patient.list, SpatiallyVariableFeatures)
+```
+```{r}
+# Plot top 4 genes in Stage 2
+# Access Stage 2 object
+Grade2 <- patient.list[["Grade 2"]]
+
+# Access Stage 3 object
+Grade3 <- patient.list[["Grade 3"]]
+
+# Access Stage 4 object
+Grade4 <- patient.list[["Grade 4"]]
+```
+
+
+```{r}
+# Plot top 4 genes in Grade 2
+SpatialFeaturePlot(Grade2,
+                   features = head(SpatiallyVariableFeatures(Grade2), 4),
+                   ncol = 2)
+```
+
+
+```{r}
+# Plot top 4 genes in Stage 3
+SpatialFeaturePlot(Grade3,
+                   features = head(SpatiallyVariableFeatures(Grade3), 4),
+                   ncol = 2)
+```
+
+
+```{r}
+# Plot top genes in Stage 4
+SpatialFeaturePlot(Grade4,
+                   features = head(SpatiallyVariableFeatures(Grade4), 10),
+                   ncol = 5)
+```
+
+```{r}
+SpatialFeaturePlot(patient.merge, features = c("TTYH2"), pt.size = 1)
+SpatialFeaturePlot(patient.merge, features = c("CLDND1"), pt.size = 1)
+SpatialFeaturePlot(patient.merge, features = c("EDIL3"), pt.size = 1)
+```
+
+
+```{r}
+SpatialFeaturePlot(patient.merge, features = c("SRCIN1"), pt.size = 1)
+```
+
+```{r}
+library(patchwork)
+
+features <- c("TTYH2") # "CLDND1", "EDIL3", "SRCIN1"
+
+plots <- lapply(features, function(gene) {
+  SpatialFeaturePlot(
+    patient.merge,
+    features = gene,
+    pt.size = 2, #spot size for genes
+    image.alpha = 0.3 # makes H&E lighter (range 0–1)
+  ) + scale_fill_viridis_c(option = "viridis") +
+    #ggtitle(gene) +
+    theme(
+      legend.text = element_text(size = 10),
+      legend.title = element_text(size = 12),
+      plot.title = element_text(size = 14, face = "bold")
+    )
+})
+
+wrap_plots(plots)
+```
+```{r}
+SpatialFeaturePlot(
+  patient.merge,
+  features = c("SRCIN1"),
+  pt.size = 2,
+  image.alpha = 0.3
+) & 
+scale_fill_viridis_c(option = "viridis") &
+theme(
+  legend.text = element_text(size = 10),
+  legend.title = element_text(size = 12),
+  plot.title = element_text(size = 14, face = "bold")
+)
+
+```
+
+
+```{r}
+SpatialFeaturePlot(patient.merge, features = c("EDIL3"), pt.size = 1)
+SpatialFeaturePlot(patient.merge, features = c("SRCIN1"), pt.size = 1)
+SpatialFeaturePlot(patient.merge, features = c("ZEB1"), pt.size = 1)
+SpatialFeaturePlot(patient.merge, features = c("SOX4"), pt.size = 1)
+```
+```{r}
+#make violin plots 
+VlnPlot(patient.merge, features = "TTYH2", pt.size = 0.1)
+VlnPlot(patient.merge, features = "CLDND1", pt.size = 0.1)
+VlnPlot(patient.merge, features = "EDIL3", pt.size = 0.1)
+VlnPlot(patient.merge, features = "SRCIN1", pt.size = 0.1)
+VlnPlot(patient.merge, features = "THY1", pt.size = 0.1)
+VlnPlot(patient.merge, features = "CRYAB", pt.size = 0.1)
+```
+
+
+```{r}
+#export per sample lists of spatially variable features 
+
+stage2_svgs <- SpatiallyVariableFeatures(Grade2)
+stage3_svgs <- SpatiallyVariableFeatures(Grade3)
+stage4_svgs <- SpatiallyVariableFeatures(Grade4)
+
+write.csv(stage2_svgs, "Grade2_spatially_variable_genes.csv", row.names = FALSE)
+write.csv(stage3_svgs, "Grade3_spatially_variable_genes.csv", row.names = FALSE)
+write.csv(stage4_svgs, "Grade4_spatially_variable_genes.csv", row.names = FALSE)
+```
+
+```{r}
+#enrichment analysis
+# Load the packages
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(enrichplot)
+library(ReactomePA)
+```
+```{r}
+
+```
+
+```{r}
+head(stage4_markers)
+sig_genes <- rownames(stage4_markers[stage4_markers$p_val_adj < 0.05, ])
+```
+```{r}
+enrichment4 <- enrichGO(gene         = sig_genes,
+                        OrgDb        = org.Hs.eg.db,
+                        keyType      = "SYMBOL",
+                        ont          = "BP",
+                        minGSSize    = 50,
+                        pAdjustMethod = "BH")
+```
+
+```{r}
+head(enrichment4, n=10)
+```
+
+```{r}
+# Visualize the top enriched GO terms
+dotplot(enrichment4, showCategory = 10, title = "GO Enrichment for Upregulated Genes")
+```
+
+
+```{r}
+enrichment4_mf <- enrichGO(gene         = sig_genes,
+                        OrgDb        = org.Hs.eg.db,
+                        keyType      = "SYMBOL",
+                        ont          = "MF",
+                        minGSSize    = 50,
+                        pAdjustMethod = "BH")
+```
+
+```{r}
+head(enrichment4_mf, n=10)
+```
+```{r}
+# Visualize the top enriched GO terms
+dotplot(enrichment4_mf, showCategory = 10, title = "GO Enrichment for Upregulated Genes")
+```
+```{r}
+enrichment4_cc <- enrichGO(gene         = sig_genes,
+                        OrgDb        = org.Hs.eg.db,
+                        keyType      = "SYMBOL",
+                        ont          = "CC",
+                        minGSSize    = 50,
+                        pAdjustMethod = "BH")
+```
+
+```{r}
+head(enrichment4_cc, n=10)
+```
+
+```{r}
+# Visualize the top enriched GO terms
+dotplot(enrichment4_cc, showCategory = 10, title = "GO Enrichment for Upregulated Genes")
+```
+
+```{r}
+#KEGG Pathway Enrichment
+# Convert gene symbols to Entrez IDs for KEGG analysis
+sig_genes_entrez <- bitr(sig_genes, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)$ENTREZID
+```
+
+```{r}
+# KEGG pathway enrichment for upregulated genes
+kegg_up <- enrichKEGG(gene = sig_genes_entrez, 
+                      organism = "hsa", 
+                      pvalueCutoff = 0.05)
+```
+```{r}
+head(kegg_up, n=10)
+# Visualize KEGG pathway results
+dotplot(kegg_up, showCategory = 10, title = "KEGG Pathway Enrichment for Upregulated Genes")
+```
+```{r}
+# Reactome pathway enrichment for upregulated genes
+reactome_up <- enrichPathway(gene = sig_genes_entrez, 
+                             organism = "human", 
+                             pvalueCutoff = 0.05)
+```
+```{r}
+
+```
+
+```{r}
+# Visualize Reactome pathways
+head(reactome_up, n=10)
+dotplot(reactome_up, showCategory = 10, title = "Reactome Pathway Enrichment for Upregulated Genes")
+```
+

@@ -2,238 +2,198 @@ Spatial Transcriptomics Progression Analysis
 
 This repository contains three complementary analysis scripts used to study astrocytoma biology, proliferation, spatial heterogeneity, and survival outcomes using:
 
-Spatial transcriptomics–derived ROI data
+- Spatial transcriptomics–derived ROI data (GeoMx DSP)
 
-Normalized expression matrices
+- Visium 10X Spatial transcriptomics
 
-Differential expression (DESeq2)
+- Differential expression (DESeq2)
 
-Gene set enrichment analysis (GSEA)
+- Gene set enrichment analysis (GSEA)
 
-Penalized Cox regression survival modeling (TCGA)
+- Penalized Cox regression survival modeling (TCGA)
 
-Each script can be run independently but together form a complete analysis pipeline from exploratory visualization to survival prediction.
+Scripts are modular but conceptually linked, progressing from spatial expression analysis → pathway discovery → survival relevance.
 
 Script 1: Spatial ROI Expression Analysis & Visualization
-Purpose
 
-Performs exploratory and statistical analysis of ROI-level normalized gene expression with associated histopathological metadata. Focuses on proliferation (Ki67%), spatial context, and gene–phenotype correlations.
+Performs ROI-level spatial transcriptomic analysis using normalized and raw count data. This script integrates:
 
-Input Data
+- Exploratory visualization
 
-Q3_Normalize_progression.xlsx
+- Gene–proliferation correlations (Ki67%)
 
-SegmentProperties (metadata)
+- Dimensionality reduction and clustering
 
-TargetCountMatrix (normalized expression)
+- Differential expression (IV vs other)
 
-Key Steps
-
-Load required Python packages (scanpy, pandas, seaborn, matplotlib)
-
-Import normalized counts and metadata from Excel
-
-Convert expression matrix to AnnData
-
-Align and attach metadata to observations
-
-Generate dot plots:
-Ki67% by histology (core_edge)
-
-genes of intereset by tumor grade
-
-Dimensionality reduction:
-
-PCA
-
-Neighbors graph
-
-UMAP
-
-Leiden clustering
-
-Linear regression analysis:
-
-Gene expression vs Ki67%
-
-ROI-level and grade-averaged regressions
-
-Error bars (SEM) for grouped means
-
-Outputs
-
-Dot plots (Scanpy)
-
-Scatterplots with regression lines
-
-PCA/UMAP embeddings
-
-Leiden cluster assignments
-
-Dependencies
-
-Python ≥ 3.9
-
-scanpy
-
-pandas
-
-numpy
-
-seaborn
-
-matplotlib
-
-scikit-learn
-
-scipy
-
-Script 2: Differential Expression & Gene Set Enrichment Analysis
-Purpose
-
-Identifies differentially expressed genes between tumor groups (e.g., Grade IV vs other) and performs functional enrichment analysis.
+- Gene set enrichment analysis
 
 Input Data
 
-Q3_Normalize_progression.xlsx
+- Q3_Normalize_progression.xlsx
 
-Raw count matrix
+- SegmentProperties — ROI metadata
 
-Segment metadata with comparison variable
-
-Key Steps
-
-Load raw counts and metadata
-
-Prepare DESeq2-compatible count matrix
-
-Define experimental design:
-
-Single-factor comparison (IV vs other)
-
-Run DESeq2 using PyDESeq2
-
-Filter significant genes:
-
-padj < 0.05
-
-|log2FC| > 0.5
-
-baseMean ≥ 10
-
-Normalize and log-transform counts
-
-Perform Gene Set Enrichment Analysis:
-
-GO Biological Process
-
-GO Molecular Function
-
-Visualize enrichment results
-
-Outputs
-
-deseq2_IV_vs_other_results.csv
-
-Bar plots of enriched GO terms
-
-Dot plots of molecular function enrichment
-
-Dependencies
-
-Python ≥ 3.9
-
-pydeseq2
-
-numpy
-
-pandas
-
-gseapy
-
-sanbomics
-
-matplotlib
-
-seaborn
-
-Script 3: TCGA IDH-Mutant Glioma Survival Modeling
-
-LASSO & Elastic Net Cox Regression
-
-Purpose
-
-Builds gene-based survival models to predict overall survival (OS) and progression-free survival (PFS) in IDH-mutant gliomas using TCGA data.
+- TargetCountMatrix — expression counts
 
 Input Data
 
-TCGA-CDR-SupplementalTableS1.xlsx (clinical outcomes)
-
-EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv (RNA-seq)
-
-ijms-2057006_TableS2.xlsx (IDH mutation status)
-
 Key Steps
 
-Harmonize TCGA barcodes across datasets
+1. Load normalized counts and metadata from Excel
 
-Filter for IDH-mutant cases
+2. Convert expression matrix to AnnData
 
-Log₂-transform RNA-seq expression
+3. Align metadata with observations
 
-Define biologically informed gene panels
+4. Attach metadata to observations
 
-Construct survival objects (OS, PFS)
+Exploratory Analysis
 
-Train penalized Cox models:
+- Dot plots
+- PCA, neighbors graph, UMAP
+- Leiden clustering
 
-LASSO (α = 1)
+Regression Analysis
 
-Elastic Net (α optimized)
+Visualization:
 
-Extract non-zero coefficients
+- Scatterplots with regression lines
 
-Compute and scale risk scores
+- Error bars for grouped means
 
-Evaluate models:
+Differential Expression (DESeq2)
 
-Concordance index (C-index)
+- Raw counts converted to integer matrix
 
-Kaplan–Meier curves
+- Single-factor design
 
-Log-rank tests
-
-Perform grade-adjusted multivariable Cox analysis
-
-Outputs
-
-Selected gene signatures
-
-Risk scores
-
-Kaplan–Meier plots
-
-Hazard ratios with 95% CIs
-
-Model performance metrics
+Gene Set Enrichment Analysis
 
 Dependencies
 
-R ≥ 4.2
+ - Python ≥ 3.9
 
-glmnet
+- scanpy
 
-survival
+- pandas
 
-survminer
+- numpy
 
-tidyverse
+- seaborn
 
-readxl
+- matplotlib
 
-broom
+- scikit-learn
 
-gridExtra
+- scipy
+
+- pydeseq2
+
+- gseapy
+
+- sanbomics
+
+Script 2: Visium Spatial Transcriptomics Analysis
+
+Analyzes 10x Genomics Visium spatial transcriptomics data to characterize spatial gene expression programs and tissue architecture in glioma samples.
+
+Key Objectives
+
+- Identify spatially variable genes
+
+- Map gene expression to tissue coordinates
+
+- Compare spatial domains with histopathology
+
+- Integrate spatial findings with ROI and survival analyses
+
+Workflow
+
+- Load Visium count matrix and spatial coordinates
+
+- Create AnnData object with spatial metadata
+
+- Normalize and scale expression
+
+- Identify spatially variable genes
+
+- Perform dimensionality reduction and clustering
+
+- Visualize gene expression in tissue context
+
+Script 3: LASSO & Elastic Net Cox Regression
+
+Builds gene-based survival prediction models for IDH-mutant gliomas using TCGA RNA-seq and clinical data.
+
+Input Data
+
+  TCGA-CDR-SupplementalTableS1.xlsx — clinical outcomes
+
+  EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv — RNA-seq
+
+  ijms-2057006_TableS2.xlsx — IDH mutation status
+
+Key Steps
+
+1. Harmonize TCGA barcodes
+
+2. Filter for IDH-mutant tumors
+
+3. Log₂-transform RNA-seq expression
+
+4. Define biologically informed gene panels
+
+5. Construct survival objects: OS and PFS
+
+5. Train penalized Cox models:
+
+  LASSO
+
+  Elastic Net
+
+6. Extract non-zero coefficients
+
+7. Compute and scale risk scores
+
+8. Evaluate models:
+
+  Concordance index (C-index)
+
+  Kaplan–Meier curves
+
+  Log-rank tests
+
+9. Fit grade-adjusted multivariable Cox models
+
+Outputs
+
+  Selected gene signatures
+
+  Risk scores
+
+  Kaplan–Meier plots
+
+  Hazard ratios with 95% CIs
+  
+  Dependencies
+
+- R ≥ 4.2
+
+- glmnet
+
+- survival
+
+- survminer
+
+- tidyverse
+
+- readxl
+
+- broom
+
+- gridExtra
+
 
 Project Structure
 project-root/
@@ -250,15 +210,15 @@ project-root/
 │   ├── tables/
 │── README.md
 
-Notes & Caveats
+Notes
 
-Normalization is assumed complete for Script 1.
+Normalization is assumed complete for ROI analyses.
 
-DESeq2 analysis uses raw integer counts.
+DESeq2 requires raw integer counts.
 
-Survival models are restricted to IDH-mutant astrocytomas.
+Visium analysis depends on correct spatial coordinate files.
 
-Risk scores are rescaled for visualization, not direct clinical interpretation.
+Survival models are restricted to IDH-mutant gliomas.
 
-Random train/test splits may introduce minor variability.
+Risk scores are scaled for visualization only.
 

@@ -14,6 +14,8 @@ This repository contains three complementary analysis scripts used to study astr
 
 Scripts are modular but conceptually linked, progressing from spatial expression analysis → pathway discovery → survival relevance.
 
+The workflow compares Grade 2, Grade 3, and Grade 4 glioma samples from the same patient across disease progression first using GeoMx, then using Visium 10X.
+
 Script 1: Spatial ROI Expression Analysis & Visualization
 
 Performs ROI-level spatial transcriptomic analysis using normalized and raw count data. This script integrates:
@@ -106,21 +108,57 @@ Key Objectives
 
 - Compare spatial domains with histopathology
 
-- Integrate spatial findings with ROI and survival analyses
-
 Workflow
+1. Data Loading
 
-- Load Visium count matrix and spatial coordinates
+Each Visium dataset is loaded separately using Load10X_Spatial():
 
-- Create AnnData object with spatial metadata
+Expression counts
 
-- Normalize and scale expression
+Spatial coordinates
 
-- Identify spatially variable genes
+Histology images
 
-- Perform dimensionality reduction and clustering
+Each sample is assigned to a grade-specific Seurat object.
 
-- Visualize gene expression in tissue context
+2. Quality Control Metrics
+
+3. Spot Filtering
+
+4. Normalization and Scaling
+
+Each dataset undergoes:
+
+- Log-normalization (NormalizeData)
+
+- Z-score scaling (ScaleData)
+
+5. Dataset Integration
+   
+6.Dimensionality Reduction & Clustering
+
+7. Differential Expression Analysis
+   
+- Grade-Based DE
+- Marker Identification
+
+8. Spatially Variable Gene Analysis
+
+9. Gene-Level Spatial Visualization
+
+10. Functional Enrichment Analysis
+
+Dependencies
+
+- R ≥ 4.2
+- Seurat v4 or v5
+- ggplot2
+- patchwork
+- dplyr
+- clusterProfiler
+- org.Hs.eg.db
+- enrichplot
+- ReactomePA
 
 Script 3: LASSO & Elastic Net Cox Regression
 
@@ -212,13 +250,10 @@ project-root/
 
 Notes
 
-Normalization is assumed complete for ROI analyses.
+GeoMx: Normalization is assumed complete for ROI analyses. DESeq2 requires raw integer counts.
 
-DESeq2 requires raw integer counts.
-
-Visium analysis depends on correct spatial coordinate files.
+Visium: Spatial normalization uses Seurat’s default log-normalization. Z-normalization occurs during ScaleData(). Scaling is recalculated after merging due to Seurat object structure. Differential expression uses normalized (log) data. Spatial variability uses Moran’s I statistic.
 
 Survival models are restricted to IDH-mutant gliomas.
 
 Risk scores are scaled for visualization only.
-

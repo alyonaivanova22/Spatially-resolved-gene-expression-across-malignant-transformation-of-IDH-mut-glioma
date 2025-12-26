@@ -168,7 +168,7 @@ Input Data
 
   TCGA-CDR-SupplementalTableS1.xlsx — clinical outcomes
 
-  EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv — RNA-seq
+  EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv — RNA-seq - can be downloaded from https://gdc.cancer.gov/about-data/publications/pancanatlas
 
   ijms-2057006_TableS2.xlsx — IDH mutation status
 
@@ -232,21 +232,6 @@ Outputs
 
 - gridExtra
 
-
-Project Structure
-project-root/
-│── data/
-│   ├── Q3_Normalize_progression.xlsx
-│   ├── TCGA_clinical.xlsx
-│   ├── TCGA_expression.tsv
-│── scripts/
-│   ├── spatial_analysis.py
-│   ├── deseq2_analysis.py
-│   ├── survival_modeling.R
-│── results/
-│   ├── figures/
-│   ├── tables/
-│── README.md
 
 Notes
 

@@ -1,0 +1,1507 @@
+---
+title: "regression models"
+output: html_document
+date: "2026-08-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# 1. LOAD PACKAGES
+# ============================================================
+
+library(glmnet)
+library(survival)
+library(survminer)
+library(tidyverse)
+library(readxl)
+library(broom)
+library(gridExtra)
+```
+
+```{r}
+# 2. LOAD DATA
+# ============================================================
+
+# Clinical data
+clinical <- read_excel(
+  ".../TCGA-CDR-SupplementalTableS1.xlsx",
+  sheet = 1
+)
+
+# RNA-seq data
+expr_raw <- read.delim(
+  ".../EBPlusPlusAdjustPANCAN_IlluminaHiSeq_RNASeqV2.geneExp.tsv",
+  stringsAsFactors = FALSE
+)
+
+# IDH status
+idh_data <- read_excel(
+  ".../ijms-2057006_TableS2.xlsx",
+  sheet = 1
+)
+
+```
+
+```{r}
+# 3. CLEAN PATIENT IDENTIFIERS
+# ============================================================
+
+# Rename IDH identifier to match clinical data
+colnames(idh_data)[colnames(idh_data) == "Case_ID"] <-
+  "bcr_patient_barcode"
+
+# Standardize patient identifiers
+clinical$bcr_patient_barcode <-
+  toupper(trimws(clinical$bcr_patient_barcode))
+
+idh_data$bcr_patient_barcode <-
+  toupper(trimws(idh_data$bcr_patient_barcode))
+
+
+# ============================================================
+# 4. MERGE CLINICAL + IDH DATA
+# ============================================================
+
+merged_data <- merge(
+  idh_data,
+  clinical,
+  by = "bcr_patient_barcode",
+  all.x = TRUE
+)
+```
+
+```{r}
+# 4. MERGE CLINICAL + IDH DATA
+# ============================================================
+
+merged_data <- merge(
+  idh_data,
+  clinical,
+  by = "bcr_patient_barcode",
+  all.x = TRUE
+)
+
+```
+```{r}
+# 5. PROCESS RNA-SEQ DATA
+# ============================================================
+
+expr_data <- as.data.frame(expr_raw)
+
+# Separate gene symbol and Entrez ID
+expr_data_clean <- expr_data %>%
+  tidyr::separate(
+    gene_id,
+    into = c("gene_symbol", "entrez_id"),
+    sep = "\\|"
+  )
+
+# Remove duplicate gene symbols
+expr_data_nodup <- expr_data_clean %>%
+  group_by(gene_symbol) %>%
+  slice(1) %>%
+  ungroup()
+
+# Convert to patient x gene format
+expr_tidy <- expr_data_nodup %>%
+  column_to_rownames("gene_symbol") %>%
+  select(-entrez_id) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("barcode")
+
+```
+```{r}
+# 6. CLEAN RNA-SEQ BARCODES
+# ============================================================
+
+# Remove the first non-patient/header row if present
+expr_tidy <- expr_tidy[-1, ]
+
+# Convert periods to hyphens
+expr_tidy$barcode <- gsub(
+  "\\.",
+  "-",
+  expr_tidy$barcode
+)
+
+# Retain first three barcode components
+expr_tidy$barcode <- sapply(
+  strsplit(expr_tidy$barcode, "-"),
+  function(x) paste(x[1:3], collapse = "-")
+)
+
+```
+```{r}
+# 7. MERGE CLINICAL AND RNA-SEQ DATA
+# ============================================================
+
+merged <- inner_join(
+  merged_data,
+  expr_tidy,
+  by = c("bcr_patient_barcode" = "barcode")
+)
+
+```
+
+```{r}
+# 8. FILTER FOR IDH-MUTANT ASTROCYTOMA
+# ============================================================
+
+merged_filtered <- merged %>%
+  filter(`IDH status` == "Mutant")
+
+
+```
+```{r}
+# 9. DEFINE GENE SIGNATURE
+# ============================================================
+
+genes_of_interest <- c(
+  "TTYH2",
+  "DNAJB2",
+  "MYH2",
+  "CNP",
+  "CNTN2",
+  "DAAM2",
+  "PLEKHG3",
+  "CLDND1",
+  "EDIL3",
+  "SRCIN1",
+  "CRYAB",
+  "CD44",
+  "SEMA4D",
+  "THY1",
+  "CDH9",
+  "CDH12",
+  "NCAM2",
+  "EPHA7",
+  "EPHA10",
+  "CORO6",
+  "RASAL1",
+  "CELF4"
+)
+# Check that all genes are present
+missing_genes <- setdiff(
+  genes_of_interest,
+  colnames(merged_filtered)
+)
+
+if (length(missing_genes) > 0) {
+  warning(
+    "The following genes are missing: ",
+    paste(missing_genes, collapse = ", ")
+  )
+}
+
+
+```
+
+```{r}
+# 10. CREATE OS AND PFS ANALYSIS COHORTS
+# ============================================================
+
+merged_filtered_clean <- merged_filtered %>%
+  filter(
+    !is.na(OS.time),
+    !is.na(OS),
+    OS.time > 0
+  )
+
+merged_filtered_pfi_clean <- merged_filtered %>%
+  filter(
+    !is.na(PFI.time),
+    !is.na(PFI),
+    PFI.time > 0
+  )
+
+```
+```{r}
+# 11. FORMAT TCGA GRADE
+# ============================================================
+
+merged_filtered_clean$`TCGA Grade` <- factor(
+  merged_filtered_clean$`TCGA Grade`,
+  levels = c("G2", "G3", "G4")
+)
+
+merged_filtered_pfi_clean$`TCGA Grade` <- factor(
+  merged_filtered_pfi_clean$`TCGA Grade`,
+  levels = c("G2", "G3", "G4")
+)
+
+```
+
+```{r}
+# 12. CREATE EXPRESSION MATRICES
+# ============================================================
+
+# OS
+x_os <- merged_filtered_clean %>%
+  select(all_of(genes_of_interest)) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  as.matrix()
+
+x_os <- log2(x_os + 1)
+
+y_os <- Surv(
+  merged_filtered_clean$OS.time,
+  merged_filtered_clean$OS
+)
+
+
+# PFS
+x_pfs <- merged_filtered_pfi_clean %>%
+  select(all_of(genes_of_interest)) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  as.matrix()
+
+x_pfs <- log2(x_pfs + 1)
+
+y_pfs <- Surv(
+  merged_filtered_pfi_clean$PFI.time,
+  merged_filtered_pfi_clean$PFI
+)
+
+```
+```{r}
+# 13. TRAIN / TEST SPLIT
+# ============================================================
+
+set.seed(123)
+
+train_idx_os <- sample(
+  seq_len(nrow(x_os)),
+  size = floor(0.75 * nrow(x_os))
+)
+
+test_idx_os <- setdiff(
+  seq_len(nrow(x_os)),
+  train_idx_os
+)
+
+
+set.seed(123)
+
+train_idx_pfs <- sample(
+  seq_len(nrow(x_pfs)),
+  size = floor(0.75 * nrow(x_pfs))
+)
+
+test_idx_pfs <- setdiff(
+  seq_len(nrow(x_pfs)),
+  train_idx_pfs
+)
+
+# OS
+x_train_os <- x_os[train_idx_os, ]
+x_test_os  <- x_os[test_idx_os, ]
+
+y_train_os <- y_os[train_idx_os]
+y_test_os  <- y_os[test_idx_os]
+
+
+# PFS
+x_train_pfs <- x_pfs[train_idx_pfs, ]
+x_test_pfs  <- x_pfs[test_idx_pfs, ]
+
+y_train_pfs <- y_pfs[train_idx_pfs]
+y_test_pfs  <- y_pfs[test_idx_pfs]
+
+
+# Grade
+grade_test_os <- merged_filtered_clean$`TCGA Grade`[
+  test_idx_os
+]
+
+grade_test_pfs <- merged_filtered_pfi_clean$`TCGA Grade`[
+  test_idx_pfs
+]
+```
+```{r}
+# 14. CHECK TRAIN / TEST SAMPLE SIZES
+# ============================================================
+
+cat("\n===== OS =====\n")
+cat("Total:", nrow(x_os), "\n")
+cat("Training:", nrow(x_train_os), "\n")
+cat("Testing:", nrow(x_test_os), "\n")
+
+cat("\nOS events:\n")
+print(table(y_os[, "status"]))
+
+cat("\nTraining OS events:\n")
+print(table(y_train_os[, "status"]))
+
+cat("\nTesting OS events:\n")
+print(table(y_test_os[, "status"]))
+
+
+cat("\n===== PFS =====\n")
+cat("Total:", nrow(x_pfs), "\n")
+cat("Training:", nrow(x_train_pfs), "\n")
+cat("Testing:", nrow(x_test_pfs), "\n")
+
+cat("\nPFS events:\n")
+print(table(y_pfs[, "status"]))
+
+cat("\nTraining PFS events:\n")
+print(table(y_train_pfs[, "status"]))
+
+cat("\nTesting PFS events:\n")
+print(table(y_test_pfs[, "status"]))
+
+
+```
+```{r}
+# 15. LASSO COX REGRESSION
+# ============================================================
+
+set.seed(123)
+
+lasso_os <- cv.glmnet(
+  x_train_os,
+  y_train_os,
+  family = "cox",
+  alpha = 1,
+  nfolds = 10
+)
+
+
+set.seed(123)
+
+lasso_pfs <- cv.glmnet(
+  x_train_pfs,
+  y_train_pfs,
+  family = "cox",
+  alpha = 1,
+  nfolds = 10
+)
+```
+```{r}
+# 16. ELASTIC-NET COX REGRESSION
+# ============================================================
+
+alphas <- seq(
+  0.05,
+  0.95,
+  by = 0.05
+)
+
+
+find_best_elastic_net <- function(x_train, y_train, alphas) {
+
+  results <- vector(
+    "list",
+    length(alphas)
+  )
+
+  for (i in seq_along(alphas)) {
+
+    set.seed(123)
+
+    cv_fit <- cv.glmnet(
+      x_train,
+      y_train,
+      family = "cox",
+      alpha = alphas[i],
+      nfolds = 10
+    )
+
+    results[[i]] <- list(
+      alpha = alphas[i],
+      model = cv_fit,
+      cv_error = min(cv_fit$cvm)
+    )
+  }
+
+  cv_errors <- sapply(
+    results,
+    function(x) x$cv_error
+  )
+
+  best <- results[[which.min(cv_errors)]]
+
+  return(best)
+}
+
+
+enet_os <- find_best_elastic_net(
+  x_train_os,
+  y_train_os,
+  alphas
+)
+
+enet_pfs <- find_best_elastic_net(
+  x_train_pfs,
+  y_train_pfs,
+  alphas
+)
+# Display selected alpha values
+cat(
+  "Best elastic-net alpha, OS:",
+  enet_os$alpha,
+  "\n"
+)
+
+cat(
+  "Best elastic-net alpha, PFS:",
+  enet_pfs$alpha,
+  "\n"
+)
+
+
+# Extract actual glmnet models
+enet_os_model <- enet_os$model
+enet_pfs_model <- enet_pfs$model
+```
+```{r}
+# 17. EXTRACT NON-ZERO COEFFICIENTS
+# ============================================================
+
+get_nonzero_coefs <- function(model, gene_names) {
+
+  coefs <- coef(
+    model,
+    s = "lambda.min"
+  )
+
+  data.frame(
+    Gene = gene_names[coefs@i + 1],
+    Coefficient = as.numeric(coefs@x)
+  )
+}
+
+
+lasso_os_coefs <- get_nonzero_coefs(
+  lasso_os,
+  colnames(x_os)
+)
+
+lasso_pfs_coefs <- get_nonzero_coefs(
+  lasso_pfs,
+  colnames(x_pfs)
+)
+
+enet_os_coefs <- get_nonzero_coefs(
+  enet_os_model,
+  colnames(x_os)
+)
+
+enet_pfs_coefs <- get_nonzero_coefs(
+  enet_pfs_model,
+  colnames(x_pfs)
+)
+
+
+# View coefficients
+lasso_os_coefs
+lasso_pfs_coefs
+enet_os_coefs
+enet_pfs_coefs
+
+```
+```{r}
+# 18. PLOT COEFFICIENTS
+# ============================================================
+
+plot_coefs <- function(df, title) {
+
+  ggplot(
+    df,
+    aes(
+      x = Coefficient,
+      y = reorder(Gene, Coefficient)
+    )
+  ) +
+    geom_segment(
+      aes(
+        x = 0,
+        xend = Coefficient,
+        yend = Gene
+      ),
+      color = "gray"
+    ) +
+    geom_point() +
+    labs(
+      title = title,
+      x = "Coefficient",
+      y = "Gene"
+    ) +
+    theme_minimal()
+}
+
+
+grid.arrange(
+  plot_coefs(
+    lasso_pfs_coefs,
+    "LASSO Cox regression coefficients for PFS"
+  ),
+  plot_coefs(
+    lasso_os_coefs,
+    "LASSO Cox regression coefficients for OS"
+  ),
+  plot_coefs(
+    enet_pfs_coefs,
+    "Elastic-net Cox regression coefficients for PFS"
+  ),
+  plot_coefs(
+    enet_os_coefs,
+    "Elastic-net Cox regression coefficients for OS"
+  ),
+  ncol = 2
+)
+```
+```{r}
+# 19. GENERATE TEST-SET RISK SCORES
+# ============================================================
+
+# IMPORTANT:
+# Scores are generated using models trained ONLY in the training cohort.
+# lambda.min is used consistently for all models.
+
+
+lasso_os_score <- as.numeric(
+  predict(
+    lasso_os,
+    newx = x_test_os,
+    s = "lambda.min",
+    type = "link"
+  )
+)
+
+
+lasso_pfs_score <- as.numeric(
+  predict(
+    lasso_pfs,
+    newx = x_test_pfs,
+    s = "lambda.min",
+    type = "link"
+  )
+)
+enet_os_score <- as.numeric(
+  predict(
+    enet_os_model,
+    newx = x_test_os,
+    s = "lambda.min",
+    type = "link"
+  )
+)
+
+
+enet_pfs_score <- as.numeric(
+  predict(
+    enet_pfs_model,
+    newx = x_test_pfs,
+    s = "lambda.min",
+    type = "link"
+  )
+)
+```
+```{r}
+# 20. CREATE TEST DATASETS
+# ============================================================
+
+test_data_os <- data.frame(
+  OS_time = merged_filtered_clean$OS.time[test_idx_os],
+  OS_event = merged_filtered_clean$OS[test_idx_os],
+  TCGA_Grade = grade_test_os,
+  lasso_os_score = lasso_os_score,
+  enet_os_score = enet_os_score
+)
+
+
+test_data_pfs <- data.frame(
+  PFS_time = merged_filtered_pfi_clean$PFI.time[test_idx_pfs],
+  PFS_event = merged_filtered_pfi_clean$PFI[test_idx_pfs],
+  TCGA_Grade = grade_test_pfs,
+  lasso_pfs_score = lasso_pfs_score,
+  enet_pfs_score = enet_pfs_score
+)
+
+```
+
+```{r}
+# 21. CHECK TEST DATA
+# ============================================================
+
+summary(test_data_os)
+summary(test_data_pfs)
+
+colSums(
+  is.na(
+    test_data_os[
+      ,
+      c(
+        "OS_time",
+        "OS_event",
+        "lasso_os_score",
+        "enet_os_score",
+        "TCGA_Grade"
+      )
+    ]
+  )
+)
+
+colSums(
+  is.na(
+    test_data_pfs[
+      ,
+      c(
+        "PFS_time",
+        "PFS_event",
+        "lasso_pfs_score",
+        "enet_pfs_score",
+        "TCGA_Grade"
+      )
+    ]
+  )
+
+```
+```{r}
+# 22. COX MODELS: GENE SCORES ALONE
+# ============================================================
+
+cox_lasso_os <- coxph(
+  Surv(OS_time, OS_event) ~ lasso_os_score,
+  data = test_data_os
+)
+
+cox_enet_os <- coxph(
+  Surv(OS_time, OS_event) ~ enet_os_score,
+  data = test_data_os
+)
+
+
+cox_lasso_pfs <- coxph(
+  Surv(PFS_time, PFS_event) ~ lasso_pfs_score,
+  data = test_data_pfs
+)
+
+cox_enet_pfs <- coxph(
+  Surv(PFS_time, PFS_event) ~ enet_pfs_score,
+  data = test_data_pfs
+)
+
+```
+```{r}
+# 23. COX MODELS: TCGA GRADE ALONE
+# ============================================================
+
+cox_grade_os <- coxph(
+  Surv(OS_time, OS_event) ~ TCGA_Grade,
+  data = test_data_os
+)
+
+cox_grade_pfs <- coxph(
+  Surv(PFS_time, PFS_event) ~ TCGA_Grade,
+  data = test_data_pfs
+)
+
+```
+```{r}
+# 24. COX MODELS: GENE SCORE + TCGA GRADE
+# ============================================================
+
+cox_lasso_grade_os <- coxph(
+  Surv(OS_time, OS_event) ~
+    lasso_os_score + TCGA_Grade,
+  data = test_data_os
+)
+
+cox_enet_grade_os <- coxph(
+  Surv(OS_time, OS_event) ~
+    enet_os_score + TCGA_Grade,
+  data = test_data_os
+)
+
+
+cox_lasso_grade_pfs <- coxph(
+  Surv(PFS_time, PFS_event) ~
+    lasso_pfs_score + TCGA_Grade,
+  data = test_data_pfs
+)
+
+cox_enet_grade_pfs <- coxph(
+  Surv(PFS_time, PFS_event) ~
+    enet_pfs_score + TCGA_Grade,
+  data = test_data_pfs
+)
+```
+
+```{r}
+# 25. VIEW MODEL SUMMARIES
+# ============================================================
+
+summary(cox_lasso_os)
+summary(cox_enet_os)
+
+summary(cox_lasso_pfs)
+summary(cox_enet_pfs)
+
+summary(cox_grade_os)
+summary(cox_grade_pfs)
+
+summary(cox_lasso_grade_os)
+summary(cox_enet_grade_os)
+
+summary(cox_lasso_grade_pfs)
+summary(cox_enet_grade_pfs)
+```
+
+```{r}
+# 26. LIKELIHOOD-RATIO TESTS
+# ============================================================
+
+# OS
+anova(
+  cox_grade_os,
+  cox_lasso_grade_os,
+  test = "LRT"
+)
+
+anova(
+  cox_grade_os,
+  cox_enet_grade_os,
+  test = "LRT"
+)
+
+
+# PFS
+anova(
+  cox_grade_pfs,
+  cox_lasso_grade_pfs,
+  test = "LRT"
+)
+
+anova(
+  cox_grade_pfs,
+  cox_enet_grade_pfs,
+  test = "LRT"
+)
+```
+
+```{r}
+# 27. FUNCTION TO EXTRACT HR, CI, P-VALUE AND C-INDEX
+# ============================================================
+
+extract_cox_results <- function(model, model_name) {
+
+  s <- summary(model)
+
+  data.frame(
+    Model = model_name,
+    Variable = rownames(s$coefficients),
+    HR = s$conf.int[, "exp(coef)"],
+    CI_lower = s$conf.int[, "lower .95"],
+    CI_upper = s$conf.int[, "upper .95"],
+    P_value = s$coefficients[, "Pr(>|z|)"],
+    C_index = s$concordance[1],
+    C_index_SE = s$concordance[2]
+  )
+}
+```
+
+```{r}
+# 28. EXTRACT GENE-SCORE RESULTS
+# ============================================================
+
+gene_score_results <- bind_rows(
+
+  extract_cox_results(
+    cox_lasso_os,
+    "LASSO OS"
+  ),
+
+  extract_cox_results(
+    cox_enet_os,
+    "Elastic-net OS"
+  ),
+
+  extract_cox_results(
+    cox_lasso_pfs,
+    "LASSO PFS"
+  ),
+
+  extract_cox_results(
+    cox_enet_pfs,
+    "Elastic-net PFS"
+  )
+
+)
+
+
+gene_score_results
+
+```
+```{r}
+# 29. EXTRACT GRADE RESULTS
+# ============================================================
+
+grade_results <- bind_rows(
+
+  extract_cox_results(
+    cox_grade_os,
+    "TCGA Grade OS"
+  ),
+
+  extract_cox_results(
+    cox_grade_pfs,
+    "TCGA Grade PFS"
+  )
+
+)
+
+grade_results
+
+```
+```{r}
+# 30. EXTRACT COMBINED MODEL RESULTS
+# ============================================================
+
+combined_results <- bind_rows(
+
+  extract_cox_results(
+    cox_lasso_grade_os,
+    "LASSO + Grade OS"
+  ),
+
+  extract_cox_results(
+    cox_enet_grade_os,
+    "Elastic-net + Grade OS"
+  ),
+
+  extract_cox_results(
+    cox_lasso_grade_pfs,
+    "LASSO + Grade PFS"
+  ),
+
+  extract_cox_results(
+    cox_enet_grade_pfs,
+    "Elastic-net + Grade PFS"
+  )
+
+)
+
+combined_results
+```
+```{r}
+# 31. C-INDEX COMPARISON
+# ============================================================
+
+cindex_results <- data.frame(
+
+  Outcome = c(
+    "OS",
+    "OS",
+    "OS",
+    "PFS",
+    "PFS",
+    "PFS"
+  ),
+
+  Model = c(
+    "LASSO score",
+    "Elastic-net score",
+    "TCGA Grade",
+    "LASSO score",
+    "Elastic-net score",
+    "TCGA Grade"
+  ),
+
+  C_index = c(
+    summary(cox_lasso_os)$concordance[1],
+    summary(cox_enet_os)$concordance[1],
+    summary(cox_grade_os)$concordance[1],
+    summary(cox_lasso_pfs)$concordance[1],
+    summary(cox_enet_pfs)$concordance[1],
+    summary(cox_grade_pfs)$concordance[1]
+  ),
+
+  SE = c(
+    summary(cox_lasso_os)$concordance[2],
+    summary(cox_enet_os)$concordance[2],
+    summary(cox_grade_os)$concordance[2],
+    summary(cox_lasso_pfs)$concordance[2],
+    summary(cox_enet_pfs)$concordance[2],
+    summary(cox_grade_pfs)$concordance[2]
+  )
+)
+
+cindex_results
+```
+
+```{r}
+# 32. KAPLAN-MEIER ANALYSIS
+# ============================================================
+
+make_km_plot <- function(
+    data,
+    time,
+    event,
+    score,
+    label
+) {
+
+  df <- data[, c(time, event, score)]
+
+  colnames(df) <- c(
+    "time",
+    "event",
+    "score"
+  )
+
+  cut <- surv_cutpoint(
+    df,
+    time = "time",
+    event = "event",
+    variables = "score"
+  )
+
+  df$risk_group <- surv_categorize(cut)$score
+
+  surv_fit <- survfit(
+    Surv(time, event) ~ risk_group,
+    data = df
+  )
+
+  ggsurvplot(
+    surv_fit,
+    data = df,
+    pval = TRUE,
+    risk.table = TRUE,
+    palette = c("#1f78b4", "#e31a1c"),
+    legend.labs = c("Low", "High"),
+    title = paste("KM Curve:", label)
+  )
+}
+
+```
+```{r}
+# 33. GENERATE KM PLOTS
+# ============================================================
+
+km_lasso_pfs <- make_km_plot(
+  test_data_pfs,
+  "PFS_time",
+  "PFS_event",
+  "lasso_pfs_score",
+  "LASSO - PFS"
+)
+
+km_lasso_os <- make_km_plot(
+  test_data_os,
+  "OS_time",
+  "OS_event",
+  "lasso_os_score",
+  "LASSO - OS"
+)
+
+km_enet_pfs <- make_km_plot(
+  test_data_pfs,
+  "PFS_time",
+  "PFS_event",
+  "enet_pfs_score",
+  "Elastic-net - PFS"
+)
+
+km_enet_os <- make_km_plot(
+  test_data_os,
+  "OS_time",
+  "OS_event",
+  "enet_os_score",
+  "Elastic-net - OS"
+)
+# Arrange plots
+grid.arrange(
+  km_lasso_pfs$plot,
+  km_lasso_os$plot,
+  km_enet_pfs$plot,
+  km_enet_os$plot,
+  ncol = 2
+)
+
+```
+```{r}
+# 34. FINAL MODEL SUMMARY
+# ============================================================
+
+gene_score_results
+grade_results
+combined_results
+cindex_results
+```
+
+```{r}
+# ============================================================
+# REGULARIZED MODEL COEFFICIENTS
+# ============================================================
+
+extract_glmnet_coefs <- function(model, model_name, genes) {
+  
+  # Extract coefficient matrix at lambda.min
+  coef_matrix <- as.matrix(coef(model, s = "lambda.min"))
+  
+  # Convert to data frame
+  coef_df <- data.frame(
+    Gene = rownames(coef_matrix),
+    Coefficient = as.numeric(coef_matrix[, 1]),
+    stringsAsFactors = FALSE
+  )
+  
+  # Keep only non-zero coefficients
+  coef_df <- coef_df %>%
+    filter(Coefficient != 0)
+  
+  # Add model name
+  coef_df$Model <- model_name
+  
+  # Reorder columns
+  coef_df <- coef_df %>%
+    select(Model, Gene, Coefficient)
+  
+  return(coef_df)
+}
+
+# Extract coefficients
+coef_lasso_os <- extract_glmnet_coefs(
+  lasso_os,
+  "LASSO OS",
+  genes_of_interest
+)
+
+coef_lasso_pfs <- extract_glmnet_coefs(
+  lasso_pfs,
+  "LASSO PFS",
+  genes_of_interest
+)
+
+coef_enet_os <- extract_glmnet_coefs(
+  enet_os,
+  "Elastic Net OS",
+  genes_of_interest
+)
+
+coef_enet_pfs <- extract_glmnet_coefs(
+  enet_pfs,
+  "Elastic Net PFS",
+  genes_of_interest
+)
+
+# Combine
+regularized_coefficients <- bind_rows(
+  coef_lasso_os,
+  coef_lasso_pfs,
+  coef_enet_os,
+  coef_enet_pfs
+)
+
+# Round coefficients for presentation
+regularized_coefficients <- regularized_coefficients %>%
+  mutate(Coefficient = round(Coefficient, 4))
+
+regularized_coefficients
+```
+
+
+```{r}
+class(enet_os)
+class(enet_pfs)
+
+enet_os_coefs
+enet_pfs_coefs
+```
+
+
+```{r}
+lasso_os_coefs
+lasso_pfs_coefs
+enet_os_coefs
+enet_pfs_coefs
+```
+
+
+```{r}
+# Check the column names first
+colnames(lasso_os_coefs)
+colnames(lasso_pfs_coefs)
+colnames(enet_os_coefs)
+colnames(enet_pfs_coefs)
+```
+
+```{r}
+library(dplyr)
+
+regularized_coefficients <- bind_rows(
+  
+  lasso_os_coefs %>%
+    mutate(Model = "LASSO OS"),
+  
+  lasso_pfs_coefs %>%
+    mutate(Model = "LASSO PFS"),
+  
+  enet_os_coefs %>%
+    mutate(Model = "Elastic Net OS"),
+  
+  enet_pfs_coefs %>%
+    mutate(Model = "Elastic Net PFS")
+) %>%
+  select(Model, Gene, Coefficient) %>%
+  arrange(Model, desc(abs(Coefficient)))
+
+regularized_coefficients
+```
+
+
+```{r}
+regularized_coefficients_wide <- regularized_coefficients %>%
+  mutate(Coefficient = round(Coefficient, 4)) %>%
+  tidyr::pivot_wider(
+    names_from = Model,
+    values_from = Coefficient
+  )
+
+regularized_coefficients_wide
+```
+
+```{r}
+write.csv(
+  regularized_coefficients_wide,
+  ".../Supplementary_Table_Regularized_Model_Coefficients.csv",
+  row.names = FALSE
+)
+```
+
+```{r}
+cox_lasso_os <- coxph(
+  Surv(OS_time, OS_event) ~ lasso_os_score,
+  data = test_data_os
+)
+
+cox_lasso_pfs <- coxph(
+  Surv(PFS_time, PFS_event) ~ lasso_pfs_score,
+  data = test_data_pfs
+)
+
+cox_enet_os <- coxph(
+  Surv(OS_time, OS_event) ~ enet_os_score,
+  data = test_data_os
+)
+
+cox_enet_pfs <- coxph(
+  Surv(PFS_time, PFS_event) ~ enet_pfs_score,
+  data = test_data_pfs
+)
+```
+
+```{r}
+extract_performance <- function(model, outcome, model_name, n, events) {
+  
+  s <- summary(model)
+  
+  data.frame(
+    Outcome = outcome,
+    Model = model_name,
+    N = n,
+    Events = events,
+    HR = exp(coef(model))[1],
+    CI_lower = exp(confint(model))[1, 1],
+    CI_upper = exp(confint(model))[1, 2],
+    P_value = s$coefficients[1, "Pr(>|z|)"],
+    C_index = s$concordance[1],
+    C_index_SE = s$concordance[2]
+  )
+}
+```
+
+
+```{r}
+extract_grade_performance <- function(model, outcome, model_name, n, events) {
+  
+  s <- summary(model)
+  
+  data.frame(
+    Outcome = outcome,
+    Model = model_name,
+    N = n,
+    Events = events,
+    HR = NA,
+    CI_lower = NA,
+    CI_upper = NA,
+    P_value = s$logtest["pvalue"],
+    C_index = s$concordance[1],
+    C_index_SE = s$concordance[2]
+  )
+}
+```
+
+```{r}
+test_set_performance <- bind_rows(
+  
+  # -------------------------
+  # OS
+  # -------------------------
+  
+  extract_performance(
+    cox_lasso_os,
+    "OS",
+    "LASSO",
+    nrow(test_data_os),
+    sum(test_data_os$OS_event == 1)
+  ),
+  
+  extract_performance(
+    cox_enet_os,
+    "OS",
+    "Elastic Net",
+    nrow(test_data_os),
+    sum(test_data_os$OS_event == 1)
+  ),
+  
+  extract_grade_performance(
+  cox_grade_os,
+  "OS",
+  "TCGA Grade",
+  nobs(cox_grade_os),
+  cox_grade_os$nevent
+),
+  
+  
+  # -------------------------
+  # PFS
+  # -------------------------
+  
+  extract_performance(
+    cox_lasso_pfs,
+    "PFS",
+    "LASSO",
+    nrow(test_data_pfs),
+    sum(test_data_pfs$PFS_event == 1)
+  ),
+  
+  extract_performance(
+    cox_enet_pfs,
+    "PFS",
+    "Elastic Net",
+    nrow(test_data_pfs),
+    sum(test_data_pfs$PFS_event == 1)
+  ),
+  
+  extract_grade_performance(
+  cox_pfs_grade,
+  "PFS",
+  "TCGA Grade",
+  nobs(cox_pfs_grade),
+  cox_pfs_grade$nevent
+)
+)
+
+test_set_performance
+```
+
+```{r}
+test_set_performance <- bind_rows(
+  
+  extract_performance(
+    cox_lasso_os,
+    "OS",
+    "LASSO",
+    nrow(test_data_os),
+    sum(test_data_os$OS_event == 1)
+  ),
+  
+  extract_performance(
+    cox_enet_os,
+    "OS",
+    "Elastic Net",
+    nrow(test_data_os),
+    sum(test_data_os$OS_event == 1)
+  ),
+  
+  extract_performance(
+    cox_lasso_pfs,
+    "PFS",
+    "LASSO",
+    nrow(test_data_pfs),
+    sum(test_data_pfs$PFS_event == 1)
+  ),
+  
+  extract_performance(
+    cox_enet_pfs,
+    "PFS",
+    "Elastic Net",
+    nrow(test_data_pfs),
+    sum(test_data_pfs$PFS_event == 1)
+  )
+)
+
+test_set_performance
+```
+
+
+```{r}
+cox_grade_os
+cox_grade_pfs
+```
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# ============================================================
+# C-INDEX COMPARISON — TEST SET
+# ============================================================
+
+cindex_df <- data.frame(
+  Outcome = c(
+    "OS", "OS", "OS", "OS", "OS",
+    "PFS", "PFS", "PFS", "PFS", "PFS"
+  ),
+  
+  Model = c(
+    "LASSO",
+    "LASSO + Grade",
+    "Elastic Net",
+    "Elastic Net + Grade",
+    "TCGA Grade",
+    "LASSO",
+    "LASSO + Grade",
+    "Elastic Net",
+    "Elastic Net + Grade",
+    "TCGA Grade"
+  ),
+  
+  C_index = c(
+    0.5324841,
+    0.7120000,
+    0.5312102,
+    0.71402878,
+    0.7230216,
+    
+    0.5253378,
+    0.5750000,
+    0.5563063,
+    0.59234234,
+    0.5800882
+  ),
+  
+  SE = c(
+    0.10001324,
+    0.09287651,
+    0.09645093,
+    0.09287651,
+    0.07917231,
+    
+    0.06238601,
+    0.06000000,
+    0.05788830,
+    0.05730145,
+    0.06171913
+  )
+)
+
+# Calculate 95% CI
+cindex_df <- cindex_df %>%
+  mutate(
+    CI_lower = C_index - 1.96 * SE,
+    CI_upper = C_index + 1.96 * SE,
+    C_label = sprintf("%.3f", C_index)
+  )
+
+# Model order
+cindex_df$Model <- factor(
+  cindex_df$Model,
+  levels = c(
+    "TCGA Grade",
+    "LASSO",
+    "LASSO + Grade",
+    "Elastic Net",
+    "Elastic Net + Grade"
+  )
+)
+
+# ============================================================
+# PLOT
+# ============================================================
+
+ggplot(
+  cindex_df,
+  aes(
+    x = C_index,
+    y = Model
+  )
+) +
+  
+  # 95% CI
+  geom_errorbar(
+    aes(
+      xmin = CI_lower,
+      xmax = CI_upper
+    ),
+    orientation = "y",
+    height = 0.18,
+    linewidth = 0.8
+  ) +
+  
+  # C-index point
+  geom_point(
+    size = 3.5
+  ) +
+  
+  # C-index value
+  geom_text(
+    aes(
+      label = C_label
+    ),
+    nudge_y = 0.23,
+    size = 4,
+    fontface = "bold"
+  ) +
+  
+  # Chance level
+  geom_vline(
+    xintercept = 0.5,
+    linetype = "dashed",
+    linewidth = 0.7
+  ) +
+  
+  facet_wrap(
+    ~ Outcome,
+    nrow = 1
+  ) +
+  
+  labs(
+    x = "Concordance index (95% CI)",
+    y = NULL
+  ) +
+  
+  # Long enough to accommodate the widest CI
+  coord_cartesian(
+    xlim = c(0.25, 0.85),
+    clip = "off"
+  ) +
+  
+  theme_minimal(base_size = 14) +
+  
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_line(),
+    strip.text = element_text(
+      size = 16,
+      face = "bold"
+    ),
+    axis.text.y = element_text(
+      size = 12
+    ),
+    axis.text.x = element_text(
+      size = 11
+    ),
+    plot.margin = margin(
+      10, 20, 10, 10
+    )
+  )
+```
+
+
